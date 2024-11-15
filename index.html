@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Full Certificate Decoder</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/forge/0.10.0/forge.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f7f7f7;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            text-align: center;
+        }
+
+        h1 {
+            text-align: center;
+        }
+
+        .textarea-container {
+            width: 100%;
+            max-width: 600px;
+        }
+
+        textarea {
+            width: 100%;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 14px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: #fff;
+            box-sizing: border-box;
+        }
+
+        button {
+            display: block;
+            width: 200px;
+            padding: 10px;
+            margin: 20px auto;
+            background-color: #4CAF50;
+            color: white;
+            font-size: 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+
+        .decoded-output {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            max-width: 800px;
+            margin: 20px auto;
+            font-family: monospace;
+        }
+
+        .decoded-output h2 {
+            margin-top: 0;
+            font-size: 24px;
+        }
+
+        .decoded-output .detail {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            padding: 5px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .decoded-output .detail:last-child {
+            border-bottom: none;
+        }
+
+        .detail-title {
+            font-weight: bold;
+            color: #333;
+            width: 30%;
+        }
+
+        .detail-value {
+            color: #555;
+            width: 65%;
+            word-wrap: break-word;
+        }
+
+        .subject-table {
+            width: 100%;
+            margin: 20px 0;
+            border-collapse: collapse;
+        }
+
+        .subject-table th,
+        .subject-table td {
+            padding: 8px;
+            border: 1px solid #ddd;
+            text-align: left;
+        }
+
+        .subject-table th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+
+        .subject-table td {
+            background-color: #fff;
+        }
+
+        .error {
+            color: red;
+            text-align: center;
+            padding: 10px;
+            background-color: #f8d7da;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Full Certificate Decoder</h1>
+
+    <div class="textarea-container">
+        <textarea id="certInput" rows="10" placeholder="Paste your certificate here..."></textarea><br>
+    </div>
+    <button id="decodeButton">Decode Certificate</button>
+
+    <div id="decodedOutput" class="decoded-output"></div>
+
+    <script>
+        document.getElementById('decodeButton').addEventListener('click', function() {
+            const certInput = document.getElementById('certInput').value.trim();
+
+            // Check if the input is in PEM format
+            if (!certInput.startsWith("-----BEGIN CERTIFICATE-----") || !certInput.endsWith("-----END CERTIFICATE-----")) {
+                document.getElementById('decodedOutput').innerHTML = '<div class="error">Invalid certificate format. Please ensure it starts with "-----BEGIN CERTIFICATE-----" and ends with "-----END CERTIFICATE-----".</div>';
+                return;
+            }
+
+            try {
+                // Remove the PEM header and footer
+                const pemBody = certInput
+                    .replace(/-----BEGIN CERTIFICATE-----/g, "")
+                    .replace(/-----END CERTIFICATE-----/g, "")
+                    .replace(/\s/g, ""); // Remove whitespace
+
+                // Decode Base64 to binary
+                const binaryDerString = window.atob(pemBody);
+                const binaryLen = binaryDerString.length;
+                const bytes = new Uint8Array(binaryLen);
+                for (let i = 0; i < binaryLen; i++) {
+                    bytes[i] = binaryDerString.charCodeAt(i);
+                }
+
+                // Convert to Forge buffer
+                const asn1 = forge.asn1.fromDer(forge.util.createBuffer(bytes));
+                const certificate = forge.pki.certificateFromAsn1(asn1);
+
+                let output = '';
+
+                // Subject
+                output += '<h2>Subject:</h2>';
+                output += '<table class="subject-table">';
+                certificate.subject.attributes.forEach(attr => {
+                    output += `
+                        <tr>
+                            <th>${attr.name}</th>
+                            <td>${attr.value}</td>
+                        </tr>
+                    `;
+                });
+                output += '</table>';
+
+                // Issuer
+                output += '<h2>Issuer:</h2>';
+                output += '<table class="subject-table">';
+                certificate.issuer.attributes.forEach(attr => {
+                    output += `
+                        <tr>
+                            <th>${attr.name}</th>
+                            <td>${attr.value}</td>
+                        </tr>
+                    `;
+                });
+                output += '</table>';
+
+                // Serial Number
+                output += generateDetail("Serial Number", certificate.serialNumber);
+
+                // Validity Period
+                output += generateDetail("Valid From", certificate.validity.notBefore);
+                output += generateDetail("Valid Until", certificate.validity.notAfter);
+
+                // Public Key
+                const publicKey = certificate.publicKey;
+                output += generateDetail("Public Key", forge.pki.publicKeyToPem(publicKey));
+
+                // Key Size (for RSA)
+                let keySize = '';
+                if (publicKey.n) {
+                    // RSA key size
+                    keySize = publicKey.n.bitLength();
+                } else if (publicKey.curve) {
+                    // EC key size (in bits, based on the curve)
+                    const curveName = publicKey.curve.name;
+                    keySize = (curveName === 'P-256') ? 256 :
+                              (curveName === 'P-384') ? 384 :
+                              (curveName === 'P-521') ? 521 : 'Unknown EC curve';
+                } else {
+                    keySize = 'Unknown key type';
+                }
+                output += generateDetail("Key Size", `${keySize} bits`);
+
+                // Key Algorithm
+                output += generateDetail("Key Algorithm", certificate.publicKey.algorithm);
+
+                // Signature Algorithm
+                output += generateDetail("Signature Algorithm", certificate.signatureAlgorithm);
+
+                // Signature
+                output += generateDetail("Signature", forge.util.bytesToHex(certificate.signature).toUpperCase());
+
+                // Extensions
+                if (certificate.extensions && certificate.extensions.length > 0) {
+                    output += '<h2>Extensions:</h2>';
+                    certificate.extensions.forEach(ext => {
+                        output += generateDetail(`Extension OID: ${ext.id}`, forge.util.bytesToHex(ext.value).toUpperCase());
+                    });
+                } else {
+                    output += generateDetail("Extensions", "No extensions found.");
+                }
+
+                // Key Usage
+                if (certificate.keyUsage) {
+                    output += generateDetail("Key Usage", certificate.keyUsage.join(", "));
+                } else {
+                    output += generateDetail("Key Usage", "Not specified.");
+                }
+
+                // Extended Key Usage
+                if (certificate.extendedKeyUsage) {
+                    output += generateDetail("Extended Key Usage", certificate.extendedKeyUsage.join(", "));
+                } else {
+                    output += generateDetail("Extended Key Usage", "Not specified.");
+                }
+
+                // CRL Distribution Points
+                if (certificate.crlDistributionPoints && certificate.crlDistributionPoints.length > 0) {
+                    output += '<h2>CRL Distribution Points:</h2>';
+                    certificate.crlDistributionPoints.forEach(point => {
+                        output += generateDetail("CRL Distribution Point", point.uri);
+                    });
+                } else {
+                    output += generateDetail("CRL Distribution Points", "None found.");
+                }
+
+                // Subject Alternative Names (if any)
+                if (certificate.subjectAltNames && certificate.subjectAltNames.length > 0) {
+                    output += '<h2>Subject Alternative Names:</h2>';
+                    certificate.subjectAltNames.forEach(name => {
+                        output += generateDetail("SAN", name);
+                    });
+                } else {
+                    output += generateDetail("Subject Alternative Names", "None found.");
+                }
+
+                // Authority Key Identifier
+                if (certificate.extensions) {
+                    const akiExt = certificate.extensions.find(ext => ext.id === '2.5.29.35');
+                    if (akiExt) {
+                        const akiValue = forge.asn1.fromDer(akiExt.value);
+                        output += generateDetail("Authority Key Identifier", forge.util.bytesToHex(akiValue));
+                    }
+                }
+
+                // Subject Key Identifier
+                if (certificate.extensions) {
+                    const skiExt = certificate.extensions.find(ext => ext.id === '2.5.29.14');
+                    if (skiExt) {
+                        const skiValue = forge.util.bytesToHex(skiExt.value);
+                        output += generateDetail("Subject Key Identifier", skiValue);
+                    }
+                }
+
+                // Basic Constraints
+                if (certificate.extensions) {
+                    const bcExt = certificate.extensions.find(ext => ext.id === '2.5.29.19');
+                    if (bcExt) {
+                        output += generateDetail("Basic Constraints", forge.util.bytesToHex(bcExt.value));
+                    }
+                }
+
+                document.getElementById('decodedOutput').innerHTML = output;
+
+            } catch (error) {
+                document.getElementById('decodedOutput').innerHTML = `<div class="error">Error decoding certificate: ${error.message}</div>`;
+            }
+        });
+
+        // Function to generate each detail in the UI
+        function generateDetail(title, value) {
+            return `
+                <div class="detail">
+                    <div class="detail-title">${title}:</div>
+                    <div class="detail-value">${value}</div>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>

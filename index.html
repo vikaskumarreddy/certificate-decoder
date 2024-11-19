@@ -138,13 +138,6 @@
     <script>
         document.getElementById('decodeButton').addEventListener('click', function() {
             const certInput = document.getElementById('certInput').value.trim();
-
-            // Check if the input is in PEM format
-            if (!certInput.startsWith("-----BEGIN CERTIFICATE-----") || !certInput.endsWith("-----END CERTIFICATE-----")) {
-                document.getElementById('decodedOutput').innerHTML = '<div class="error">Invalid certificate format. Please ensure it starts with "-----BEGIN CERTIFICATE-----" and ends with "-----END CERTIFICATE-----".</div>';
-                return;
-            }
-
             try {
                 // Remove the PEM header and footer
                 const pemBody = certInput
